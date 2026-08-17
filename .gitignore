@@ -1,0 +1,31 @@
+# Dependencies & build
+web/node_modules/
+web/.next/
+web/out/
+web/.vercel/
+web/*.tsbuildinfo
+web/next-env.d.ts
+
+# Env & secrets
+web/.env
+web/.env.local
+web/.env*.local
+.env
+.env.local
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Flutter
+agent_app/.dart_tool/
+agent_app/.flutter-plugins
+agent_app/.flutter-plugins-dependencies
+agent_app/build/
+agent_app/.idea/
+
+# Supabase local
+supabase/.temp/
+supabase/.branches/
