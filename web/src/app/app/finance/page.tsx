@@ -1,17 +1,22 @@
 "use client";
 
 import { money } from "@/lib/format";
-import { usePlatform } from "@/lib/store";
+import { useClaimsBook, useJournalsBook, usePaymentsBook, usePoliciesBook } from "@/lib/data";
 import { Card, PageHeader, Stat, Table } from "@/components/ui";
 
 export default function FinancePage() {
-  const state = usePlatform();
-  const journals = state.journals;
+  const { policies } = usePoliciesBook();
+  const { claims } = useClaimsBook();
+  const { payments } = usePaymentsBook();
+  const { journals } = useJournalsBook();
   const debit = journals.reduce((s, j) => s + j.debit, 0);
   const credit = journals.reduce((s, j) => s + j.credit, 0);
-  const gwp = state.policies.reduce((s, p) => s + p.contribution, 0);
-  const wakala = state.policies.reduce((s, p) => s + p.wakala, 0);
-  const claimsExpense = state.claims
+  const gwp = policies.reduce((s, p) => s + p.contribution, 0);
+  const wakala = policies.reduce((s, p) => s + p.wakala, 0);
+  const collected = payments
+    .filter((p) => p.status === "completed" || p.status === "reconciled")
+    .reduce((s, p) => s + p.amount, 0);
+  const claimsExpense = claims
     .filter((c) => ["paid", "closed", "approved"].includes(c.status))
     .reduce((s, c) => s + (c.approved ?? c.claimed), 0);
 
@@ -19,14 +24,14 @@ export default function FinancePage() {
     <div>
       <PageHeader
         eyebrow="Accounting"
-        title="Takaful ledger & ERP hooks"
-        description="Journals post automatically from contributions, claims and surplus. Ready for SAP, Oracle, Dynamics, Sage and QuickBooks."
+        title="Operating ledger"
+        description="Journals post from contributions, claims, endorsements and surplus — the same book as Collections and Core."
       />
       <div className="grid gap-3 md:grid-cols-4">
         <Stat label="Contribution revenue" value={money(gwp)} />
         <Stat label="Wakala income" value={money(wakala)} />
+        <Stat label="Collected" value={money(collected)} hint={`${payments.length} payment rows`} />
         <Stat label="Claims expense" value={money(claimsExpense)} />
-        <Stat label="Journal volume" value={money(debit)} hint={`${journals.length} entries`} />
       </div>
       <Card className="mt-6 p-2">
         <h2 className="px-3 pt-3 font-display text-xl">General ledger</h2>
@@ -42,7 +47,7 @@ export default function FinancePage() {
           ))}
         </Table>
         <p className="px-3 py-3 text-xs text-mute">
-          Totals · debit {money(debit)} · credit {money(credit)}
+          Totals · debit {money(debit)} · credit {money(credit)} · {journals.length} entries
         </p>
       </Card>
       <div className="mt-4 grid gap-3 md:grid-cols-3 text-sm">

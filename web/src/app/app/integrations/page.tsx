@@ -7,7 +7,8 @@ import { mirrorV1Response } from "@/lib/partners/mirror_v1";
 import type { NtsaLookupResult } from "@/lib/partners/ntsa";
 import type { OcrDocumentType, OcrExtractResult } from "@/lib/partners/ocr";
 import { pushNotification } from "@/lib/events/ledger";
-import { platformStore } from "@/lib/store";
+import { platformStore, usePlatform } from "@/lib/store";
+import { enqueueWebhook, retryWebhook } from "@/lib/webhooks";
 import { Badge, Button, Card, Field, PageHeader, inputClass } from "@/components/ui";
 
 const partners = [
@@ -24,9 +25,9 @@ export default function IntegrationsPage() {
   return (
     <div>
       <PageHeader
-        eyebrow="API gateway"
-        title="Partner integrations"
-        description="Verify identity, credit, vehicles and documents before binding risk. Embed takaful via /api/v1 with demo API keys."
+        eyebrow="InsuraX Connect"
+        title="APIs & embedded insurance"
+        description="Verify identity, credit, vehicles and documents before binding risk. Embed cover via /api/v1 and receive webhooks on bind, FNOL, and payment."
       />
 
       <div className="grid gap-4 xl:grid-cols-2">
@@ -37,6 +38,7 @@ export default function IntegrationsPage() {
       </div>
 
       <ApiPlayground />
+      <WebhookInbox />
 
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {partners.map(([title, copy]) => (
@@ -514,6 +516,53 @@ function OcrPanel() {
             </Button>
           </div>
         ) : null}
+      </div>
+    </Card>
+  );
+}
+
+function WebhookInbox() {
+  const { webhooks } = usePlatform();
+
+  return (
+    <Card className="mt-4 p-5">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-teal">Webhooks</p>
+          <h2 className="mt-1 font-display text-2xl">Partner event log</h2>
+          <p className="mt-1 text-sm text-mute">
+            policy.bound, claim.reported, claim.paid, and payment.completed fire into the partner URL.
+          </p>
+        </div>
+        <Button
+          variant="secondary"
+          onClick={() => enqueueWebhook("connect.ping", { ok: true, source: "insurax-connect" })}
+        >
+          Send test event
+        </Button>
+      </div>
+      <div className="mt-4 space-y-2">
+        {webhooks.length === 0 ? (
+          <p className="text-sm text-mute">No deliveries yet. Bind a policy, file a claim, or send a test ping.</p>
+        ) : null}
+        {webhooks.slice(0, 12).map((w) => (
+          <div key={w.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line px-3 py-2 text-sm">
+            <div>
+              <p className="font-medium">{w.event}</p>
+              <p className="text-xs text-mute">
+                {w.url} · {w.createdAt.slice(0, 19).replace("T", " ")}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge status={w.status} />
+              {w.status === "failed" ? (
+                <Button variant="ghost" onClick={() => retryWebhook(w.id)}>
+                  Retry
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        ))}
       </div>
     </Card>
   );

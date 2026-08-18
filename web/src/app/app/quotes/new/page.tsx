@@ -5,9 +5,8 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { priceQuote, quoteStatusFromUw } from "@/lib/engines/quote";
 import { pushNotification } from "@/lib/events/ledger";
 import { useAuth } from "@/lib/auth";
-import { persistQuote, useProducts } from "@/lib/data";
+import { persistQuote, useParticipants, useProducts } from "@/lib/data";
 import { money } from "@/lib/format";
-import { participants } from "@/lib/seed";
 import { platformStore, usePlatform } from "@/lib/store";
 import type { Frequency } from "@/lib/types";
 import { Badge, Button, Card, Field, PageHeader, inputClass } from "@/components/ui";
@@ -21,12 +20,13 @@ function NewQuoteForm() {
   const params = useSearchParams();
   const { user, operatorId } = useAuth();
   const { products } = useProducts();
+  const { participants } = useParticipants();
   const { leads } = usePlatform();
   const preset = params.get("product");
   const leadId = params.get("lead");
   const lead = leadId ? leads.find((l) => l.id === leadId) : undefined;
   const [productId, setProductId] = useState("");
-  const [participantId, setParticipantId] = useState(user?.participantId ?? participants[0].id);
+  const [participantId, setParticipantId] = useState(user?.participantId ?? "");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [creditScore, setCreditScore] = useState<number | undefined>(undefined);
@@ -46,6 +46,15 @@ function NewQuoteForm() {
   const product = products.find((p) => p.id === resolvedProductId) ?? products[0];
   const participant = participants.find((p) => p.id === participantId) ?? participants[0];
   const quoteName = lead?.name ?? participant?.name ?? "Participant";
+
+  useEffect(() => {
+    if (participantId) return;
+    if (user?.participantId) {
+      setParticipantId(user.participantId);
+      return;
+    }
+    if (participants[0]?.id) setParticipantId(participants[0].id);
+  }, [participantId, participants, user?.participantId]);
 
   useEffect(() => {
     setCreditScore(undefined);

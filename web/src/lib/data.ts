@@ -3,10 +3,21 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
-import { mapClaim, mapPayment, mapPolicy, mapProduct, mapQuote } from "@/lib/supabase/mappers";
+import { defaultOperatorId, isUuid } from "@/lib/ids";
+import {
+  mapClaim,
+  mapJournal,
+  mapParticipant,
+  mapPayment,
+  mapPolicy,
+  mapProduct,
+  mapQuote,
+  policyRiskPayload,
+} from "@/lib/supabase/mappers";
 import { products as seedProducts, participants as seedParticipants } from "@/lib/seed";
 import { platformStore, usePlatform } from "@/lib/store";
-import type { Claim, Payment, Policy, Product, Quote } from "@/lib/types";
+import type { Claim, JournalEntry, Participant, Payment, Policy, Product, Quote } from "@/lib/types";
+import { enqueueWebhook } from "@/lib/webhooks";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function sb(): any {
@@ -50,6 +61,40 @@ export function useProducts() {
   }, [mode]);
 
   return { products, loading, error, mode };
+}
+
+export function useParticipants() {
+  const mode = useBackendMode();
+  const [participants, setParticipants] = useState<Participant[]>(seedParticipants);
+  const [loading, setLoading] = useState(mode === "supabase");
+
+  useEffect(() => {
+    if (mode !== "supabase") {
+      setParticipants(seedParticipants);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await sb().from("participants").select("*").order("full_name");
+        if (error) throw error;
+        if (!cancelled) {
+          const rows = (data ?? []).map((row: unknown) => mapParticipant(row as never));
+          setParticipants(rows.length ? rows : seedParticipants);
+        }
+      } catch {
+        if (!cancelled) setParticipants(seedParticipants);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mode]);
+
+  return { participants, loading, mode };
 }
 
 export function useQuotesBook() {
@@ -245,6 +290,45 @@ export function usePaymentsBook() {
   return { payments, loading, mode, refresh };
 }
 
+export function useJournalsBook() {
+  const mode = useBackendMode();
+  const demo = usePlatform();
+  const [journals, setJournals] = useState<JournalEntry[]>([]);
+  const [loading, setLoading] = useState(mode === "supabase");
+  const [tick, setTick] = useState(0);
+  const refresh = useCallback(() => setTick((t) => t + 1), []);
+
+  useEffect(() => {
+    if (mode !== "supabase") {
+      setJournals(demo.journals);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const { data, error } = await sb()
+          .from("journal_entries")
+          .select("id, entry_date, reference, memo, debit, credit")
+          .order("entry_date", { ascending: false })
+          .limit(200);
+        if (error) throw error;
+        if (!cancelled) setJournals((data ?? []).map((row: unknown) => mapJournal(row as never)));
+      } catch {
+        if (!cancelled) setJournals(demo.journals);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, demo.journals, tick]);
+
+  return { journals, loading, mode, refresh };
+}
+
 export async function persistQuote(quote: Quote, operatorId: string) {
   if (!isSupabaseConfigured()) {
     platformStore.addQuote(quote);
@@ -256,8 +340,8 @@ export async function persistQuote(quote: Quote, operatorId: string) {
       id: quote.id,
       operator_id: operatorId,
       quote_number: quote.number,
-      participant_id: quote.participantId || null,
-      agent_id: quote.agentId || null,
+      participant_id: isUuid(quote.participantId) ? quote.participantId : null,
+      agent_id: isUuid(quote.agentId) ? quote.agentId : null,
       product_id: quote.productId,
       channel: quote.channel,
       status: quote.status,
@@ -282,6 +366,13 @@ export async function persistQuote(quote: Quote, operatorId: string) {
 }
 
 export async function persistPolicy(policy: Policy, operatorId: string) {
+  enqueueWebhook("policy.bound", {
+    policyNumber: policy.number,
+    participantName: policy.participantName,
+    productName: policy.productName,
+    status: policy.status,
+    contribution: policy.contribution,
+  });
   if (!isSupabaseConfigured()) {
     platformStore.addPolicy(policy);
     return policy;
@@ -292,9 +383,10 @@ export async function persistPolicy(policy: Policy, operatorId: string) {
       id: policy.id,
       operator_id: operatorId,
       policy_number: policy.number,
+      quote_id: isUuid(policy.quoteId) ? policy.quoteId : null,
       participant_id: policy.participantId,
       product_id: policy.productId,
-      agent_id: policy.agentId || null,
+      agent_id: isUuid(policy.agentId) ? policy.agentId : null,
       status: policy.status,
       channel: policy.channel,
       inception_date: policy.inception,
@@ -304,7 +396,7 @@ export async function persistPolicy(policy: Policy, operatorId: string) {
       frequency: policy.frequency,
       wakala_fee: policy.wakala,
       tabarru: policy.tabarru,
-      risk_payload: {},
+      risk_payload: policyRiskPayload(policy),
     })
     .select("*")
     .single();
@@ -318,6 +410,12 @@ export async function persistPolicy(policy: Policy, operatorId: string) {
 }
 
 export async function persistClaim(claim: Claim, operatorId: string) {
+  enqueueWebhook("claim.reported", {
+    claimNumber: claim.number,
+    policyNumber: claim.policyNumber,
+    claimed: claim.claimed,
+    fraudScore: claim.fraudScore,
+  });
   if (!isSupabaseConfigured()) {
     platformStore.addClaim(claim);
     return claim;
@@ -367,8 +465,64 @@ export async function updatePolicyRemote(id: string, patch: Partial<Policy>) {
   }
   const payload: Record<string, unknown> = {};
   if (patch.status) payload.status = patch.status;
+  if (patch.inception) payload.inception_date = patch.inception;
+  if (patch.expiry) payload.expiry_date = patch.expiry;
+  if (patch.sumCovered != null) payload.sum_covered = patch.sumCovered;
+  if (patch.contribution != null) payload.contribution = patch.contribution;
+  if (patch.wakala != null) payload.wakala_fee = patch.wakala;
+  if (patch.tabarru != null) payload.tabarru = patch.tabarru;
+  if (patch.history !== undefined || "pendingEndorsement" in patch) {
+    let history = patch.history;
+    if (history === undefined) {
+      const { data } = await sb().from("policies").select("risk_payload").eq("id", id).maybeSingle();
+      history = ((data?.risk_payload as { history?: Policy["history"] } | null)?.history ?? []) as Policy["history"];
+    }
+    payload.risk_payload = {
+      history: history ?? [],
+      pendingEndorsement: patch.pendingEndorsement ?? null,
+    };
+  }
+  payload.updated_at = new Date().toISOString();
   const { error } = await sb().from("policies").update(payload).eq("id", id);
   if (error) throw error;
+}
+
+export async function persistPayment(payment: Payment, operatorId = defaultOperatorId()) {
+  if (!isSupabaseConfigured()) return payment;
+  const { error } = await sb().from("payments").insert({
+    id: isUuid(payment.id) ? payment.id : crypto.randomUUID(),
+    operator_id: operatorId,
+    policy_id: isUuid(payment.policyId) ? payment.policyId : null,
+    participant_id: isUuid(payment.participantId) ? payment.participantId : null,
+    reference: payment.reference,
+    method: payment.method,
+    status: payment.status,
+    amount: payment.amount,
+    currency: "KES",
+    receipt_number: payment.receipt ?? null,
+    paid_at: payment.paidAt ?? new Date().toISOString(),
+    metadata: { policyNumber: payment.policyNumber ?? null },
+  });
+  if (error && !String(error.message).includes("duplicate")) {
+    console.error("persistPayment", error.message);
+  }
+  return payment;
+}
+
+export async function persistJournal(entry: JournalEntry, operatorId = defaultOperatorId()) {
+  if (!isSupabaseConfigured()) return entry;
+  const { error } = await sb().from("journal_entries").insert({
+    id: isUuid(entry.id) ? entry.id : crypto.randomUUID(),
+    operator_id: operatorId,
+    entry_date: entry.date,
+    reference: entry.reference,
+    memo: entry.memo,
+    source_type: "pas",
+    debit: entry.debit,
+    credit: entry.credit,
+  });
+  if (error) console.error("persistJournal", error.message);
+  return entry;
 }
 
 export async function updateClaimRemote(id: string, patch: Partial<Claim>) {

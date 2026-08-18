@@ -4,8 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { applyPolicyLifecycle, pushNotification, recordContribution } from "@/lib/events/ledger";
 import { money } from "@/lib/format";
-import { usePlatform } from "@/lib/store";
-import { updatePolicyRemote, usePoliciesBook } from "@/lib/data";
+import { updatePolicyRemote, usePaymentsBook, usePoliciesBook } from "@/lib/data";
 import { participants } from "@/lib/seed";
 import type { PaymentMethod } from "@/lib/types";
 import { Badge, Button, Card, Field, PageHeader, Table, inputClass } from "@/components/ui";
@@ -39,22 +38,24 @@ type StkPending = {
 
 export default function PaymentsPage() {
   const { user } = useAuth();
-  const demo = usePlatform();
-  const { policies } = usePoliciesBook();
-  const all = policies.length ? policies : demo.policies;
+  const { policies, refresh: refreshPolicies } = usePoliciesBook();
+  const { payments, refresh: refreshPayments } = usePaymentsBook();
   const book = useMemo(() => {
     if (user?.role === "participant" && user.participantId) {
-      return all.filter((p) => p.participantId === user.participantId);
+      return policies.filter((p) => p.participantId === user.participantId);
     }
-    return all;
-  }, [all, user]);
+    return policies;
+  }, [policies, user]);
   const visiblePayments = useMemo(() => {
     if (user?.role === "participant" && user.participantId) {
+      const ids = new Set(book.map((p) => p.id));
       const numbers = new Set(book.map((p) => p.number));
-      return demo.payments.filter((p) => p.policyNumber && numbers.has(p.policyNumber));
+      return payments.filter(
+        (p) => (p.policyId && ids.has(p.policyId)) || (p.policyNumber && numbers.has(p.policyNumber)),
+      );
     }
-    return demo.payments;
-  }, [demo.payments, book, user]);
+    return payments;
+  }, [payments, book, user]);
   const [policyId, setPolicyId] = useState("");
   const [method, setMethod] = useState<PaymentMethod>("mpesa_stk");
   const [amount, setAmount] = useState(200);
@@ -92,9 +93,11 @@ export default function PaymentsPage() {
           const policy = row.policyId ? book.find((p) => p.id === row.policyId) : undefined;
           recordContribution({
             payment: {
-              id: `pay-${row.checkoutRequestId}`,
+              id: crypto.randomUUID(),
               reference: row.receipt ? `MPESA-${row.receipt}` : row.checkoutRequestId,
+              policyId: row.policyId,
               policyNumber: row.policyNumber,
+              participantId: policy?.participantId,
               participantName: row.participantName ?? "Participant",
               method: "mpesa_stk",
               status: "reconciled",
@@ -107,6 +110,8 @@ export default function PaymentsPage() {
           if (policy?.status === "pending_payment") {
             void updatePolicyRemote(policy.id, { status: "active" });
           }
+          refreshPayments();
+          refreshPolicies();
           setMessage(`Contribution received. Receipt ${row.receipt}`);
           clearInterval(timer);
         }
@@ -138,7 +143,7 @@ export default function PaymentsPage() {
       <PageHeader
         eyebrow="Payments"
         title="Collect every way Africa pays"
-        description="M-Pesa STK Push via Daraja (live when credentials are set). Other rails remain simulated until wired."
+        description="M-Pesa STK Push via Daraja (live when credentials are set). Collections post to the same ledger as policies and journals."
       />
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="space-y-3 p-5">
@@ -206,9 +211,11 @@ export default function PaymentsPage() {
                 } else {
                   recordContribution({
                     payment: {
-                      id: `pay-${Date.now()}`,
+                      id: crypto.randomUUID(),
                       reference: `${method.toUpperCase()}-${Math.floor(Math.random() * 90000 + 10000)}`,
+                      policyId: policy.id,
                       policyNumber: policy.number,
+                      participantId: policy.participantId,
                       participantName: policy.participantName,
                       method,
                       status: "completed",
@@ -219,9 +226,11 @@ export default function PaymentsPage() {
                     policy,
                   });
                   if (policy.status === "pending_payment") {
-                    void updatePolicyRemote(policy.id, { status: "active" });
+                    await updatePolicyRemote(policy.id, { status: "active" });
                   }
-                  setMessage("Collection recorded · journal + notification posted");
+                  refreshPayments();
+                  refreshPolicies();
+                  setMessage("Collection recorded · journal posted to the live ledger");
                 }
               } catch (err) {
                 setError(err instanceof Error ? err.message : "Payment failed");

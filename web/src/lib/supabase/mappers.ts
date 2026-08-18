@@ -2,10 +2,13 @@ import type {
   Claim,
   ClaimStatus,
   Frequency,
+  JournalEntry,
+  Participant,
   Payment,
   PaymentMethod,
   PaymentStatus,
   Policy,
+  PolicyEndorsement,
   PolicyStatus,
   Product,
   ProductLine,
@@ -61,6 +64,7 @@ type DbQuote = {
 type DbPolicy = {
   id: string;
   policy_number: string;
+  quote_id?: string | null;
   participant_id: string;
   product_id: string;
   agent_id: string | null;
@@ -73,6 +77,7 @@ type DbPolicy = {
   frequency: string;
   wakala_fee: number;
   tabarru: number;
+  risk_payload?: Record<string, unknown> | null;
   created_at: string;
 };
 
@@ -94,12 +99,38 @@ type DbClaim = {
 
 type DbPayment = {
   id: string;
+  policy_id?: string | null;
+  participant_id?: string | null;
   reference: string;
   method: string;
   status: string;
   amount: number;
   paid_at: string | null;
   receipt_number: string | null;
+};
+
+type DbJournal = {
+  id: string;
+  entry_date: string;
+  reference: string | null;
+  memo: string | null;
+  debit?: number | null;
+  credit?: number | null;
+};
+
+type DbParticipant = {
+  id: string;
+  full_name: string;
+  phone: string | null;
+  email: string | null;
+  national_id: string | null;
+  date_of_birth: string | null;
+  county: string | null;
+  occupation: string | null;
+  kyc_status?: string | null;
+  source_channel?: string | null;
+  risk_score?: number | null;
+  lifetime_value?: number | null;
 };
 
 export function mapProduct(row: DbProduct): Product {
@@ -161,9 +192,14 @@ export function mapPolicy(
   row: DbPolicy,
   names?: { participantName?: string; productName?: string; agentName?: string; branch?: string },
 ): Policy {
+  const pas = (row.risk_payload ?? {}) as {
+    history?: PolicyEndorsement[];
+    pendingEndorsement?: Policy["pendingEndorsement"];
+  };
   return {
     id: row.id,
     number: row.policy_number,
+    quoteId: row.quote_id ?? undefined,
     participantId: row.participant_id,
     participantName: names?.participantName ?? "Participant",
     productId: row.product_id,
@@ -181,6 +217,8 @@ export function mapPolicy(
     wakala: Number(row.wakala_fee),
     tabarru: Number(row.tabarru),
     createdAt: row.created_at,
+    history: pas.history,
+    pendingEndorsement: pas.pendingEndorsement ?? undefined,
   };
 }
 
@@ -215,12 +253,49 @@ export function mapPayment(
   return {
     id: row.id,
     reference: row.reference,
+    policyId: row.policy_id ?? undefined,
     policyNumber: names?.policyNumber,
+    participantId: row.participant_id ?? undefined,
     participantName: names?.participantName ?? "Participant",
     method: row.method as PaymentMethod,
     status: row.status as PaymentStatus,
     amount: Number(row.amount),
     paidAt: row.paid_at ?? undefined,
     receipt: row.receipt_number ?? undefined,
+  };
+}
+
+export function mapJournal(row: DbJournal): JournalEntry {
+  return {
+    id: row.id,
+    date: row.entry_date,
+    reference: row.reference ?? "",
+    memo: row.memo ?? "",
+    debit: Number(row.debit ?? 0),
+    credit: Number(row.credit ?? 0),
+  };
+}
+
+export function mapParticipant(row: DbParticipant): Participant {
+  return {
+    id: row.id,
+    name: row.full_name,
+    phone: row.phone ?? "",
+    email: row.email ?? "",
+    nationalId: row.national_id ?? "",
+    dob: row.date_of_birth ?? "",
+    county: row.county ?? "",
+    occupation: row.occupation ?? "",
+    kyc: (row.kyc_status as Participant["kyc"]) ?? "pending",
+    channel: (row.source_channel as Participant["channel"]) ?? "web",
+    riskScore: Number(row.risk_score ?? 0),
+    clv: Number(row.lifetime_value ?? 0),
+  };
+}
+
+export function policyRiskPayload(policy: Partial<Policy>) {
+  return {
+    history: policy.history ?? [],
+    pendingEndorsement: policy.pendingEndorsement ?? null,
   };
 }

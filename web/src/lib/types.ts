@@ -201,6 +201,7 @@ export type PolicyEndorsement = {
 export type Policy = {
   id: string;
   number: string;
+  quoteId?: string;
   participantId: string;
   participantName: string;
   productId: string;
@@ -251,7 +252,9 @@ export type Claim = {
 export type Payment = {
   id: string;
   reference: string;
+  policyId?: string;
   policyNumber?: string;
+  participantId?: string;
   participantName: string;
   method: PaymentMethod;
   status: PaymentStatus;
@@ -295,6 +298,15 @@ export type NotificationItem = {
   status: "queued" | "sent" | "failed" | "read";
   createdAt: string;
   href?: string;
+};
+
+export type WebhookDelivery = {
+  id: string;
+  event: string;
+  url: string;
+  status: "queued" | "delivered" | "failed";
+  payload: Record<string, unknown>;
+  createdAt: string;
 };
 
 export type DocumentItem = {
@@ -415,4 +427,5 @@ export type PlatformState = {
   journals: JournalEntry[];
   /** Live commission / GWP deltas keyed by agent or broker id (a-* / b-*). */
   balanceDeltas: Record<string, { wallet: number; gwp: number }>;
+  webhooks: WebhookDelivery[];
 };

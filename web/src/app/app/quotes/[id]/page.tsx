@@ -46,6 +46,7 @@ export default function QuoteDetailPage() {
                   {
                     id: policyId,
                     number: `POL-${quote.productId.slice(0, 4).toUpperCase()}-${Math.floor(Math.random() * 90000 + 10000)}`,
+                    quoteId: quote.id,
                     participantId: quote.participantId,
                     participantName: quote.participantName,
                     productId: quote.productId,

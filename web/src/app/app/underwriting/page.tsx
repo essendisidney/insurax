@@ -120,6 +120,7 @@ export default function UnderwritingPage() {
                         await updatePolicyRemote(p.id, {
                           status: "active",
                           pendingEndorsement: undefined,
+                          history: p.history,
                         });
                         pushNotification({
                           channel: "email",

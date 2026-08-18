@@ -58,6 +58,7 @@ export function statusTone(status: string) {
     converted: "ok",
     accepted: "ok",
     sent: "ok",
+    delivered: "ok",
     resolved: "ok",
     pending: "warn",
     pending_payment: "warn",

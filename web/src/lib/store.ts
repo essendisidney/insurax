@@ -36,6 +36,7 @@ import type {
   SurplusPeriod,
   Ticket,
   Treaty,
+  WebhookDelivery,
 } from "./types";
 
 const KEY = "insurax.platform";
@@ -59,6 +60,7 @@ function seedState(): PlatformState {
     recoveries: seedRecoveries,
     journals: seedJournals,
     balanceDeltas: {},
+    webhooks: [],
   };
 }
 
@@ -92,6 +94,7 @@ function load() {
       recoveries: parsed.recoveries?.length ? parsed.recoveries : seedRecoveries,
       journals: parsed.journals?.length ? parsed.journals : seedJournals,
       balanceDeltas: parsed.balanceDeltas ?? {},
+      webhooks: parsed.webhooks ?? [],
     };
   } catch {
     state = seedState();
@@ -286,6 +289,17 @@ export const platformStore = {
   },
   addAuditLog(entry: Omit<AuditLogEntry, "id" | "createdAt">) {
     pushAudit(entry);
+  },
+  addWebhook(row: WebhookDelivery) {
+    state = { ...state, webhooks: [row, ...state.webhooks].slice(0, 80) };
+    emit();
+  },
+  updateWebhook(id: string, patch: Partial<WebhookDelivery>) {
+    state = {
+      ...state,
+      webhooks: state.webhooks.map((w) => (w.id === id ? { ...w, ...patch } : w)),
+    };
+    emit();
   },
   creditDistributor(id: string, walletDelta: number, gwpDelta = 0) {
     const prev = state.balanceDeltas[id] ?? { wallet: 0, gwp: 0 };

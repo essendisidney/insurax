@@ -1,8 +1,10 @@
 "use client";
 
+import { persistJournal, persistPayment } from "@/lib/data";
 import { buildPolicyCertificateHtml } from "@/lib/documents/certificate";
 import { brokers } from "@/lib/seed";
 import { platformStore } from "@/lib/store";
+import { enqueueWebhook } from "@/lib/webhooks";
 import type {
   Claim,
   DocumentItem,
@@ -25,6 +27,11 @@ export function recordContribution(input: {
     ...input.payment,
   };
   platformStore.addPayment(payment);
+  void persistPayment({
+    ...payment,
+    policyId: payment.policyId ?? input.policy?.id,
+    participantId: payment.participantId ?? input.policy?.participantId,
+  });
 
   let activated: Policy | null = null;
   if (input.policy?.status === "pending_payment") {
@@ -48,6 +55,13 @@ export function recordContribution(input: {
       }. Receipt ${payment.receipt ?? payment.reference}.`,
     });
   }
+
+  enqueueWebhook("payment.completed", {
+    reference: payment.reference,
+    amount: payment.amount,
+    policyNumber: payment.policyNumber ?? null,
+    status: payment.status,
+  });
 
   if (activated) {
     issuePolicyCertificate(activated);
@@ -73,11 +87,17 @@ export function recordClaimPayout(claim: Claim) {
     receipt: String(Math.floor(Math.random() * 900000 + 100000)),
   };
   platformStore.addPayment(payment);
+  void persistPayment({ ...payment, policyId: claim.policyId, participantId: claim.participantId });
   postJournal({
     reference: payment.reference,
     memo: `Claim settlement · ${claim.number} · ${claim.policyNumber}`,
     debit: amount,
     credit: amount,
+  });
+  enqueueWebhook("claim.paid", {
+    claimNumber: claim.number,
+    policyNumber: claim.policyNumber,
+    amount,
   });
   pushNotification({
     channel: "sms",
@@ -133,6 +153,7 @@ export function postJournal(input: {
     credit: input.credit,
   };
   platformStore.addJournal(entry);
+  void persistJournal(entry);
   return entry;
 }
 
@@ -491,6 +512,7 @@ export function recordRecoveryPaid(input: {
     receipt: String(Math.floor(Math.random() * 900000 + 100000)),
   };
   platformStore.addPayment(payment);
+  void persistPayment(payment);
   postJournal({
     reference: payment.reference,
     memo: `Reinsurance recovery · ${input.claimNumber} · ${input.treatyName}`,
